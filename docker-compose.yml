@@ -1,0 +1,8 @@
+services:
+  hun3d2:
+    build: .
+    ports:
+      - 8081:8081
+    environment:
+      - HOST_PORT=8081
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
