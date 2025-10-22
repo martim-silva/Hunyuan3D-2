@@ -32,8 +32,9 @@ import torch
 import trimesh
 import uvicorn
 from PIL import Image
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, File, UploadFile, Form
 from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from hy3dgen.rembg import BackgroundRemover
 from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline, FloaterRemover, DegenerateFaceRemover, FaceReducer, \
@@ -240,6 +241,14 @@ app.add_middleware(
     allow_headers=["*"],  # 允许所有头部
 )
 
+# Mount static files for frontend
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Serve the frontend HTML
+@app.get("/")
+async def serve_frontend():
+    return FileResponse('static/index.html')
+
 
 @app.post("/generate")
 async def generate(request: Request):
@@ -249,6 +258,68 @@ async def generate(request: Request):
     try:
         file_path, uid = worker.generate(uid, params)
         return FileResponse(file_path)
+    except ValueError as e:
+        traceback.print_exc()
+        print("Caught ValueError:", e)
+        ret = {
+            "text": server_error_msg,
+            "error_code": 1,
+        }
+        return JSONResponse(ret, status_code=404)
+    except torch.cuda.CudaError as e:
+        print("Caught torch.cuda.CudaError:", e)
+        ret = {
+            "text": server_error_msg,
+            "error_code": 1,
+        }
+        return JSONResponse(ret, status_code=404)
+    except Exception as e:
+        print("Caught Unknown Error", e)
+        traceback.print_exc()
+        ret = {
+            "text": server_error_msg,
+            "error_code": 1,
+        }
+        return JSONResponse(ret, status_code=404)
+
+
+@app.post("/generate-form")
+async def generate_form(
+    image: UploadFile = File(...),
+    seed: int = Form(1234),
+    octree_resolution: int = Form(128),
+    num_inference_steps: int = Form(5),
+    guidance_scale: float = Form(5.0),
+    texture: bool = Form(False),
+    face_count: int = Form(40000)
+):
+    """
+    Form-based endpoint for frontend file uploads
+    """
+    logger.info("Worker generating from form data...")
+    
+    try:
+        # Read the uploaded image file
+        image_data = await image.read()
+        
+        # Convert to base64 for the existing generate function
+        image_base64 = base64.b64encode(image_data).decode('utf-8')
+        
+        # Build params in the expected format
+        params = {
+            "image": image_base64,
+            "seed": seed,
+            "octree_resolution": octree_resolution,
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+            "texture": texture,
+            "face_count": face_count
+        }
+        
+        uid = uuid.uuid4()
+        file_path, uid = worker.generate(uid, params)
+        return FileResponse(file_path)
+        
     except ValueError as e:
         traceback.print_exc()
         print("Caught ValueError:", e)
@@ -311,6 +382,6 @@ if __name__ == "__main__":
 
     model_semaphore = asyncio.Semaphore(args.limit_model_concurrency)
 
-    worker = ModelWorker(model_path=args.model_path, device=args.device, enable_tex=args.enable_tex,
-                         tex_model_path=args.tex_model_path)
+    # worker = ModelWorker(model_path=args.model_path, device=args.device, enable_tex=args.enable_tex,
+    #                      tex_model_path=args.tex_model_path)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
