@@ -146,8 +146,8 @@ def load_image_from_base64(image):
 
 class ModelWorker:
     def __init__(self,
-                 model_path='tencent/Hunyuan3D-2mini',
-                 tex_model_path='tencent/Hunyuan3D-2',
+                 model_path=os.getenv('MODEL_PATH', 'tencent/Hunyuan3D-2mini'),
+                 tex_model_path=os.getenv('TEX_MODEL_PATH', 'tencent/Hunyuan3D-2'),
                  subfolder='hunyuan3d-dit-v2-mini-turbo',
                  device='cuda',
                  enable_tex=False):
@@ -371,7 +371,7 @@ async def status(uid: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="0.0.0.0")
-    parser.add_argument("--port", type=int, default=8081)
+    parser.add_argument("--port", type=int, default=os.getenv('HOST_PORT', 8081))
     parser.add_argument("--model_path", type=str, default='tencent/Hunyuan3D-2mini')
     parser.add_argument("--tex_model_path", type=str, default='tencent/Hunyuan3D-2')
     parser.add_argument("--device", type=str, default="cuda")
