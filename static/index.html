@@ -57,6 +57,85 @@
             padding: 20px;
         }
 
+        .mode-toggle {
+            background: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .mode-toggle label {
+            margin-right: 20px;
+            font-weight: 600;
+        }
+
+        .mode-toggle input[type="radio"] {
+            margin-right: 8px;
+        }
+
+        .multiview-container {
+            display: none;
+        }
+
+        .multiview-container.active {
+            display: block;
+        }
+
+        .multiview-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .view-upload {
+            text-align: center;
+        }
+
+        .view-upload h4 {
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .mini-drop-zone {
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: white;
+            min-height: 120px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mini-drop-zone:hover {
+            border-color: #764ba2;
+            background: #f0f4ff;
+        }
+
+        .mini-drop-zone.dragover {
+            border-color: #764ba2;
+            background: #e3f2fd;
+            transform: scale(1.02);
+        }
+
+        .mini-drop-zone i {
+            font-size: 1.5em;
+            color: #667eea;
+            margin-bottom: 8px;
+        }
+
+        .mini-preview {
+            max-width: 80px;
+            max-height: 80px;
+            border-radius: 4px;
+            margin-top: 8px;
+        }
+
         .drop-zone {
             border: 3px dashed #667eea;
             border-radius: 10px;
@@ -319,18 +398,67 @@
 
         <div class="main-content">
             <div class="upload-section">
-                <h3><i class="fas fa-upload"></i> Upload Image</h3>
-                <div class="drop-zone" id="dropZone">
-                    <i class="fas fa-cloud-upload-alt"></i>
-                    <h4>Drag & Drop your image here</h4>
-                    <p>or click to browse</p>
-                    <input type="file" id="fileInput" accept="image/*" style="display: none;">
-                </div>
+                <h3><i class="fas fa-upload"></i> Upload Image(s)</h3>
                 
-                <div class="preview-section" id="previewSection">
-                    <h4>Image Preview:</h4>
-                    <img id="previewImage" class="preview-image" alt="Preview">
-                    <p id="imageInfo"></p>
+                <!-- Mode Toggle -->
+                <div class="mode-toggle">
+                    <label>
+                        <input type="radio" name="mode" value="single" checked onchange="toggleMode()">
+                        <i class="fas fa-image"></i> Single Image
+                    </label>
+                    <label>
+                        <input type="radio" name="mode" value="multiview" onchange="toggleMode()">
+                        <i class="fas fa-images"></i> Multi-View (Front + Left + Back)
+                    </label>
+                </div>
+
+                <!-- Single Image Upload -->
+                <div id="singleImageContainer">
+                    <div class="drop-zone" id="dropZone">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <h4>Drag & Drop your image here</h4>
+                        <p>or click to browse</p>
+                        <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                    </div>
+                    
+                    <div class="preview-section" id="previewSection">
+                        <h4>Image Preview:</h4>
+                        <img id="previewImage" class="preview-image" alt="Preview">
+                        <p id="imageInfo"></p>
+                    </div>
+                </div>
+
+                <!-- Multi-View Upload -->
+                <div id="multiviewContainer" class="multiview-container">
+                    <div class="multiview-grid">
+                        <div class="view-upload">
+                            <h4><i class="fas fa-eye"></i> Front View</h4>
+                            <div class="mini-drop-zone" id="frontDropZone">
+                                <i class="fas fa-upload"></i>
+                                <span>Drop or click</span>
+                                <input type="file" id="frontInput" accept="image/*" style="display: none;">
+                                <img id="frontPreview" class="mini-preview" style="display: none;" alt="Front">
+                            </div>
+                        </div>
+                        <div class="view-upload">
+                            <h4><i class="fas fa-arrow-left"></i> Left View</h4>
+                            <div class="mini-drop-zone" id="leftDropZone">
+                                <i class="fas fa-upload"></i>
+                                <span>Drop or click</span>
+                                <input type="file" id="leftInput" accept="image/*" style="display: none;">
+                                <img id="leftPreview" class="mini-preview" style="display: none;" alt="Left">
+                            </div>
+                        </div>
+                        <div class="view-upload">
+                            <h4><i class="fas fa-arrow-right"></i> Back View</h4>
+                            <div class="mini-drop-zone" id="backDropZone">
+                                <i class="fas fa-upload"></i>
+                                <span>Drop or click</span>
+                                <input type="file" id="backInput" accept="image/*" style="display: none;">
+                                <img id="backPreview" class="mini-preview" style="display: none;" alt="Back">
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -351,15 +479,24 @@
                                 <label for="octreeResolution">Octree Resolution:</label>
                                 <span class="range-value" id="octreeValue">128</span>
                             </div>
-                            <input type="range" id="octreeResolution" class="form-control range-input" min="64" max="256" value="128" step="32" oninput="updateOctreeLabel()">
+                            <input type="range" id="octreeResolution" class="form-control range-input" min="64" max="512" value="128" step="32" oninput="updateOctreeLabel()">
                         </div>
                         <div class="form-group">
                             <div class="range-label">
                                 <label for="inferenceSteps">Inference Steps:</label>
                                 <span class="range-value" id="stepsValue">5</span>
                             </div>
-                            <input type="range" id="inferenceSteps" class="form-control range-input" min="1" max="20" value="5" oninput="updateStepsLabel()">
+                            <input type="range" id="inferenceSteps" class="form-control range-input" min="1" max="100" value="5" oninput="updateStepsLabel()">
                         </div>
+                    </div>
+
+                    <!-- Multiview specific parameter -->
+                    <div class="form-group" id="chunksGroup" style="display: none;">
+                        <div class="range-label">
+                            <label for="numChunks">Number of Chunks:</label>
+                            <span class="range-value" id="chunksValue">20000</span>
+                        </div>
+                        <input type="range" id="numChunks" class="form-control range-input" min="5000" max="50000" value="20000" step="5000" oninput="updateChunksLabel()">
                     </div>
 
                     <div class="form-row">
@@ -422,14 +559,56 @@
 
     <script>
         let selectedFile = null;
+        let selectedFiles = {
+            front: null,
+            left: null,
+            back: null
+        };
         let generatedModelBlob = null;
+        let currentMode = 'single';
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             initializeDropZone();
+            initializeMultiviewDropZones();
             initializeForm();
             updateLabels();
         });
+
+        function toggleMode() {
+            const mode = document.querySelector('input[name="mode"]:checked').value;
+            currentMode = mode;
+            
+            const singleContainer = document.getElementById('singleImageContainer');
+            const multiviewContainer = document.getElementById('multiviewContainer');
+            const chunksGroup = document.getElementById('chunksGroup');
+            
+            if (mode === 'single') {
+                singleContainer.style.display = 'block';
+                multiviewContainer.classList.remove('active');
+                chunksGroup.style.display = 'none';
+                
+                // Reset multiview parameters to single view defaults
+                document.getElementById('seed').value = 1234;
+                document.getElementById('octreeResolution').value = 128;
+                document.getElementById('inferenceSteps').value = 5;
+                updateLabels();
+                
+            } else {
+                singleContainer.style.display = 'none';
+                multiviewContainer.classList.add('active');
+                chunksGroup.style.display = 'block';
+                
+                // Set multiview defaults
+                document.getElementById('seed').value = 12345;
+                document.getElementById('octreeResolution').value = 380;
+                document.getElementById('inferenceSteps').value = 50;
+                updateLabels();
+            }
+            
+            hideError();
+            hideResult();
+        }
 
         function initializeDropZone() {
             const dropZone = document.getElementById('dropZone');
@@ -445,6 +624,26 @@
             dropZone.addEventListener('dragover', handleDragOver);
             dropZone.addEventListener('dragleave', handleDragLeave);
             dropZone.addEventListener('drop', handleDrop);
+        }
+
+        function initializeMultiviewDropZones() {
+            const views = ['front', 'left', 'back'];
+            
+            views.forEach(view => {
+                const dropZone = document.getElementById(`${view}DropZone`);
+                const fileInput = document.getElementById(`${view}Input`);
+                
+                // Click to browse
+                dropZone.addEventListener('click', () => fileInput.click());
+                
+                // File selection
+                fileInput.addEventListener('change', (e) => handleMultiviewFileSelect(e, view));
+                
+                // Drag and drop events
+                dropZone.addEventListener('dragover', handleDragOver);
+                dropZone.addEventListener('dragleave', handleDragLeave);
+                dropZone.addEventListener('drop', (e) => handleMultiviewDrop(e, view));
+            });
         }
 
         function initializeForm() {
@@ -521,12 +720,68 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
+        function handleMultiviewFileSelect(e, view) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // Validate file type
+            if (!file.type.startsWith('image/')) {
+                showError(`Please select a valid image file for ${view} view.`);
+                return;
+            }
+
+            // Validate file size (10MB limit)
+            if (file.size > 10 * 1024 * 1024) {
+                showError('File size must be less than 10MB.');
+                return;
+            }
+
+            selectedFiles[view] = file;
+            displayMultiviewPreview(file, view);
+            hideError();
+        }
+
+        function handleMultiviewDrop(e, view) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.currentTarget.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleMultiviewFileSelect({ target: { files: files } }, view);
+            }
+        }
+
+        function displayMultiviewPreview(file, view) {
+            const preview = document.getElementById(`${view}Preview`);
+            const dropZone = document.getElementById(`${view}DropZone`);
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+                
+                // Update drop zone content
+                dropZone.innerHTML = `
+                    <img src="${e.target.result}" class="mini-preview" alt="${view}">
+                    <span style="font-size: 12px; margin-top: 4px;">${file.name}</span>
+                `;
+            };
+            reader.readAsDataURL(file);
+        }
+
         function updateLabels() {
             updateSeedLabel();
             updateOctreeLabel();
             updateStepsLabel();
             updateGuidanceLabel();
             updateFaceLabel();
+            updateChunksLabel();
+        }
+
+        function updateChunksLabel() {
+            const value = document.getElementById('numChunks').value;
+            document.getElementById('chunksValue').textContent = parseInt(value).toLocaleString();
         }
 
         function updateSeedLabel() {
@@ -557,11 +812,23 @@
         async function handleFormSubmit(e) {
             e.preventDefault();
 
-            if (!selectedFile) {
-                showError('Please select an image file first.');
-                return;
+            if (currentMode === 'single') {
+                if (!selectedFile) {
+                    showError('Please select an image file first.');
+                    return;
+                }
+                await handleSingleImageSubmit();
+            } else {
+                // Check all three images are selected for multiview
+                if (!selectedFiles.front || !selectedFiles.left || !selectedFiles.back) {
+                    showError('Please select front, left, and back view images for multiview generation.');
+                    return;
+                }
+                await handleMultiviewSubmit();
             }
+        }
 
+        async function handleSingleImageSubmit() {
             const formData = new FormData();
             formData.append('image', selectedFile);
             formData.append('seed', document.getElementById('seed').value);
@@ -586,9 +853,46 @@
                     throw new Error(errorData.text || 'Generation failed');
                 }
 
-                // Get the GLB file
                 generatedModelBlob = await response.blob();
-                
+                showResult();
+
+            } catch (error) {
+                console.error('Error:', error);
+                showError(error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function handleMultiviewSubmit() {
+            const formData = new FormData();
+            formData.append('front_image', selectedFiles.front);
+            formData.append('left_image', selectedFiles.left);
+            formData.append('back_image', selectedFiles.back);
+            formData.append('seed', document.getElementById('seed').value);
+            formData.append('octree_resolution', document.getElementById('octreeResolution').value);
+            formData.append('num_inference_steps', document.getElementById('inferenceSteps').value);
+            formData.append('num_chunks', document.getElementById('numChunks').value);
+            formData.append('guidance_scale', document.getElementById('guidanceScale').value);
+            formData.append('texture', document.getElementById('enableTexture').checked);
+            formData.append('face_count', document.getElementById('faceCount').value);
+
+            showLoading();
+            hideError();
+            hideResult();
+
+            try {
+                const response = await fetch('/generate-multiview-form', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.text || 'Multiview generation failed');
+                }
+
+                generatedModelBlob = await response.blob();
                 showResult();
 
             } catch (error) {

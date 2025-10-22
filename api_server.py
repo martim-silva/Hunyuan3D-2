@@ -148,15 +148,22 @@ class ModelWorker:
     def __init__(self,
                  model_path=os.getenv('MODEL_PATH', 'tencent/Hunyuan3D-2mini'),
                  tex_model_path=os.getenv('TEX_MODEL_PATH', 'tencent/Hunyuan3D-2'),
+                 mv_model_path=os.getenv('MV_MODEL_PATH', 'tencent/Hunyuan3D-2mv'),
                  subfolder='hunyuan3d-dit-v2-mini-turbo',
+                 mv_subfolder='hunyuan3d-dit-v2-mv',
                  device='cuda',
-                 enable_tex=False):
+                 enable_tex=False,
+                 enable_multiview=False):
         self.model_path = model_path
+        self.mv_model_path = mv_model_path
         self.worker_id = worker_id
         self.device = device
+        self.enable_multiview = enable_multiview
         logger.info(f"Loading the model {model_path} on worker {worker_id} ...")
 
         self.rembg = BackgroundRemover()
+        
+        # Load single view pipeline
         self.pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
             model_path,
             subfolder=subfolder,
@@ -164,6 +171,19 @@ class ModelWorker:
             device=device,
         )
         self.pipeline.enable_flashvdm(mc_algo='mc')
+        
+        # Load multiview pipeline if enabled
+        if enable_multiview:
+            logger.info(f"Loading multiview model {mv_model_path} ...")
+            self.pipeline_mv = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
+                mv_model_path,
+                subfolder=mv_subfolder,
+                variant='fp16',
+                device=device,
+            )
+        else:
+            self.pipeline_mv = None
+            
         # self.pipeline_t2i = HunyuanDiTPipeline(
         #     'Tencent-Hunyuan/HunyuanDiT-v1.1-Diffusers-Distilled',
         #     device=device
@@ -186,38 +206,79 @@ class ModelWorker:
 
     @torch.inference_mode()
     def generate(self, uid, params):
-        if 'image' in params:
-            image = params["image"]
-            image = load_image_from_base64(image)
-        else:
-            if 'text' in params:
-                text = params["text"]
-                image = self.pipeline_t2i(text)
+        # Check if this is a multiview generation
+        is_multiview = params.get('multiview', False)
+        
+        if is_multiview:
+            # Handle multiview images
+            if 'images' in params:
+                # Expect params['images'] to be a dict with front, left, back base64 images
+                images = {}
+                for view in ['front', 'left', 'back']:
+                    if view in params['images']:
+                        images[view] = load_image_from_base64(params['images'][view])
+                        images[view] = self.rembg(images[view])
+                    else:
+                        raise ValueError(f"Missing {view} image for multiview generation")
+                params['image'] = images
             else:
-                raise ValueError("No input image or text provided")
-
-        image = self.rembg(image)
-        params['image'] = image
+                raise ValueError("No images provided for multiview generation")
+                
+            # Use multiview pipeline
+            if self.pipeline_mv is None:
+                raise ValueError("Multiview pipeline not loaded. Enable multiview mode.")
+            pipeline_to_use = self.pipeline_mv
+            
+        else:
+            # Handle single image
+            if 'image' in params:
+                image = params["image"]
+                image = load_image_from_base64(image)
+                image = self.rembg(image)
+                params['image'] = image
+            else:
+                if 'text' in params:
+                    text = params["text"]
+                    image = self.pipeline_t2i(text)
+                    image = self.rembg(image)
+                    params['image'] = image
+                else:
+                    raise ValueError("No input image or text provided")
+            
+            # Use single view pipeline
+            pipeline_to_use = self.pipeline
 
         if 'mesh' in params:
             mesh = trimesh.load(BytesIO(base64.b64decode(params["mesh"])), file_type='glb')
         else:
             seed = params.get("seed", 1234)
             params['generator'] = torch.Generator(self.device).manual_seed(seed)
-            params['octree_resolution'] = params.get("octree_resolution", 128)
-            params['num_inference_steps'] = params.get("num_inference_steps", 5)
+            
+            # Set appropriate default parameters based on pipeline type
+            if is_multiview:
+                params['octree_resolution'] = params.get("octree_resolution", 380)
+                params['num_inference_steps'] = params.get("num_inference_steps", 50)
+                params['num_chunks'] = params.get("num_chunks", 20000)
+            else:
+                params['octree_resolution'] = params.get("octree_resolution", 128)
+                params['num_inference_steps'] = params.get("num_inference_steps", 5)
+                params['mc_algo'] = 'mc'
+                
             params['guidance_scale'] = params.get('guidance_scale', 5.0)
-            params['mc_algo'] = 'mc'
+            
             import time
             start_time = time.time()
-            mesh = self.pipeline(**params)[0]
+            mesh = pipeline_to_use(**params)[0]
             logger.info("--- %s seconds ---" % (time.time() - start_time))
 
         if params.get('texture', False):
             mesh = FloaterRemover()(mesh)
             mesh = DegenerateFaceRemover()(mesh)
             mesh = FaceReducer()(mesh, max_facenum=params.get('face_count', 40000))
-            mesh = self.pipeline_tex(mesh, image)
+            
+            # For texture generation, use the front image if multiview
+            texture_image = params['image']['front'] if is_multiview else params['image']
+            mesh = self.pipeline_tex(mesh, texture_image)
 
         type = params.get('type', 'glb')
         with tempfile.NamedTemporaryFile(suffix=f'.{type}', delete=False) as temp_file:
@@ -345,6 +406,79 @@ async def generate_form(
         return JSONResponse(ret, status_code=404)
 
 
+@app.post("/generate-multiview-form")
+async def generate_multiview_form(
+    front_image: UploadFile = File(...),
+    left_image: UploadFile = File(...),
+    back_image: UploadFile = File(...),
+    seed: int = Form(12345),
+    octree_resolution: int = Form(380),
+    num_inference_steps: int = Form(50),
+    num_chunks: int = Form(20000),
+    guidance_scale: float = Form(5.0),
+    texture: bool = Form(False),
+    face_count: int = Form(40000)
+):
+    """
+    Form-based endpoint for multiview frontend file uploads
+    """
+    logger.info("Worker generating from multiview form data...")
+    
+    try:
+        # Read and encode all three images
+        front_data = await front_image.read()
+        left_data = await left_image.read()
+        back_data = await back_image.read()
+        
+        # Convert to base64 for the existing generate function
+        images_base64 = {
+            "front": base64.b64encode(front_data).decode('utf-8'),
+            "left": base64.b64encode(left_data).decode('utf-8'),
+            "back": base64.b64encode(back_data).decode('utf-8')
+        }
+        
+        # Build params in the expected format
+        params = {
+            "images": images_base64,
+            "multiview": True,
+            "seed": seed,
+            "octree_resolution": octree_resolution,
+            "num_inference_steps": num_inference_steps,
+            "num_chunks": num_chunks,
+            "guidance_scale": guidance_scale,
+            "texture": texture,
+            "face_count": face_count
+        }
+        
+        uid = uuid.uuid4()
+        file_path, uid = worker.generate(uid, params)
+        return FileResponse(file_path)
+        
+    except ValueError as e:
+        traceback.print_exc()
+        print("Caught ValueError:", e)
+        ret = {
+            "text": server_error_msg,
+            "error_code": 1,
+        }
+        return JSONResponse(ret, status_code=404)
+    except torch.cuda.CudaError as e:
+        print("Caught torch.cuda.CudaError:", e)
+        ret = {
+            "text": server_error_msg,
+            "error_code": 1,
+        }
+        return JSONResponse(ret, status_code=404)
+    except Exception as e:
+        print("Caught Unknown Error", e)
+        traceback.print_exc()
+        ret = {
+            "text": server_error_msg,
+            "error_code": 1,
+        }
+        return JSONResponse(ret, status_code=404)
+
+
 @app.post("/send")
 async def generate(request: Request):
     logger.info("Worker send...")
@@ -374,14 +508,17 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=os.getenv('HOST_PORT', 8081))
     parser.add_argument("--model_path", type=str, default='tencent/Hunyuan3D-2mini')
     parser.add_argument("--tex_model_path", type=str, default='tencent/Hunyuan3D-2')
+    parser.add_argument("--mv_model_path", type=str, default='tencent/Hunyuan3D-2mv')
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--limit-model-concurrency", type=int, default=5)
     parser.add_argument('--enable_tex', action='store_true')
+    parser.add_argument('--enable_multiview', action='store_true')
     args = parser.parse_args()
     logger.info(f"args: {args}")
 
     model_semaphore = asyncio.Semaphore(args.limit_model_concurrency)
 
     worker = ModelWorker(model_path=args.model_path, device=args.device, enable_tex=args.enable_tex,
-                         tex_model_path=args.tex_model_path)
+                         tex_model_path=args.tex_model_path, mv_model_path=args.mv_model_path,
+                         enable_multiview=args.enable_multiview)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
