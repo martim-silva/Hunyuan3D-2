@@ -382,6 +382,6 @@ if __name__ == "__main__":
 
     model_semaphore = asyncio.Semaphore(args.limit_model_concurrency)
 
-    # worker = ModelWorker(model_path=args.model_path, device=args.device, enable_tex=args.enable_tex,
-    #                      tex_model_path=args.tex_model_path)
+    worker = ModelWorker(model_path=args.model_path, device=args.device, enable_tex=args.enable_tex,
+                         tex_model_path=args.tex_model_path)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
